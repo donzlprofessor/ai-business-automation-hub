@@ -1,35 +1,115 @@
 # AI Business Automation Hub
 
-A local customer inquiry workspace: Python 3.12, FastAPI, SQLAlchemy 2,
-PostgreSQL, Alembic, n8n, Ollama, and a Vue 3 + TypeScript dashboard. The dashboard
-reads real inquiries and aggregate statistics and manages their status lifecycle.
-It displays supplied classification fields; it does not generate AI summaries or
-modify workflows or integration credentials.
+AI Business Automation Hub is a local customer inquiry workspace built with
+Vue 3 + TypeScript, FastAPI, and PostgreSQL. It brings validated inquiry intake,
+database-backed metrics, search, and status management into one responsive dashboard.
+n8n and Ollama provide local infrastructure for a future automation pipeline;
+HubSpot CRM synchronization requires a separately configured integration.
 
-## Architecture and technology
+## Screenshots
+
+### Dashboard
+
+![Dashboard overview](docs/screenshots/dashboard.png)
+
+### Inquiry workspace
+
+![Inquiry workspace with search, filters, and status management](docs/screenshots/inquiries.png)
+
+## Features
+
+- **Operational overview:** database-wide totals, category and status counts,
+  high-priority inquiries, and recent activity.
+- **Searchable inbox:** server-side search, filters, sorting, pagination, and
+  bookmarkable inquiry views.
+- **Inquiry lifecycle:** start progress, resolve, and reopen inquiries, with
+  stale-state conflict detection and explicit save feedback.
+- **Stored classification insights:** inspect caller-supplied categories, priorities,
+  and summaries without implying that AI processing has been verified.
+- **Validated intake API:** strict request contracts, persistent storage, explicit
+  schema migrations, and compatibility with unclassified submissions.
+- **Responsive interface:** keyboard-accessible detail dialogs, mobile navigation,
+  and loading, empty, and recoverable error states.
+
+## Quick start
+
+Prerequisites: Docker Desktop with Linux containers (WSL 2 on Windows), Docker
+Compose, and internet access for the first build. No host Python or Node installation
+is needed to run the containerized application.
+
+1. Open PowerShell in the repository root. On first setup only, copy the example:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+2. Replace all three secret placeholders in `.env` with independent random values.
+   The [full Windows setup](#run-on-windows-powershell) includes a generator that
+   writes them without printing them. Preserve existing credentials and volumes
+   when updating an installation.
+3. Validate and start the stack:
+
+   ```powershell
+   docker compose config --quiet
+   docker compose up --build -d --wait --wait-timeout 180
+   docker compose ps -a
+   Invoke-RestMethod http://127.0.0.1:8000/health
+   ```
+
+4. Open the [dashboard](http://127.0.0.1:8080) or
+   [API documentation](http://127.0.0.1:8000/docs). A fresh database starts empty;
+   use the [synthetic portfolio demo](#portfolio-demo) to add an inquiry.
+
+This starts the local services and runs database migrations. It does not install
+an Ollama model, import an n8n workflow, connect HubSpot, or configure email alerts.
+The dashboard/API have no application authentication: keep all host ports bound
+to localhost. See [security limitations](#local-security-boundaries-and-limitations).
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    Webhook[Webhook] -.-> n8n[n8n]
-    n8n -.-> Ollama[Ollama]
-    Ollama -.-> FastAPI[FastAPI]
-    FastAPI --> PostgreSQL[(PostgreSQL)]
-    PostgreSQL -.-> HubSpot[HubSpot]
-    HubSpot -.-> Email[Email Alerts]
-    Vue[Vue dashboard] --> Proxy[Local nginx proxy]
+    Webhook[Webhook intake] -.-> n8n[n8n orchestration]
+    n8n -.-> Ollama[Ollama classification]
+    Ollama -.-> n8n
+    n8n -.-> FastAPI[FastAPI backend]
+    n8n -.-> HubSpot[HubSpot CRM]
+    n8n -.-> Email[Email alerts]
+    FastAPI --> PostgreSQL[(Application PostgreSQL)]
+    Vue[Vue 3 + TypeScript] --> Proxy[Local nginx proxy]
     Proxy -->|GET and status PATCH| FastAPI
     n8n --> NDB[(Separate n8n PostgreSQL)]
 ```
 
 Solid dashboard/API/database connections are implemented. Dashed arrows represent
-the **target automation pipeline**, not verified integrations. n8n would orchestrate
-the model, persistence, CRM, and alert calls; PostgreSQL does not directly call
-HubSpot, nor does Ollama directly POST to FastAPI. The repository contains no
-workflow export, model prompt, HubSpot client, or email sender. Existing runtime
-workflows are preserved and were not audited or modified in this phase.
+the **target automation pipeline**, not verified integrations. Vue renders the
+workspace and sends requests through nginx to FastAPI. FastAPI validates requests,
+queries PostgreSQL, and persists inquiry/status changes. n8n uses a separate
+PostgreSQL instance for its own state and would orchestrate model calls, API
+persistence, CRM synchronization, and alerts. Ollama hosts local model inference;
+HubSpot CRM is an external target for sales follow-up, not a bundled service.
+The repository contains no workflow export, model prompt, HubSpot client, or email
+sender. Existing runtime workflows are preserved and have not been audited here.
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the implemented request path and
 integration boundaries, and [PORTFOLIO.md](docs/PORTFOLIO.md) for an English project
 description ready for a portfolio or project presentation.
+
+### Verified functionality and integration setup
+
+| Component | Repository status | Additional setup |
+| --- | --- | --- |
+| Vue dashboard, FastAPI, application PostgreSQL | Implemented; intake, queries, metrics, and status behavior covered by tests | Local `.env` secrets and Compose startup |
+| n8n | Container and separate database configured; service availability does not prove automation | Owner-account setup, workflow authoring/import, validation, and credentials |
+| Ollama | Local service configured; no verified classification workflow supplied | Download a model, define/evaluate a prompt, and connect it through n8n |
+| HubSpot CRM | Planned integration; no CRM client or verified synchronization supplied | HubSpot account, scoped credentials in n8n, field mapping, and a tested workflow |
+| Email alerts | Planned integration; no sender or verified delivery supplied | Provider credentials in n8n, routing, retries, and delivery checks |
+
+Credentials alone do not complete the integrations. End-to-end AI classification,
+CRM delivery, and alerts require manual configuration and separate verification.
+The dashboard displays stored classification supplied by callers; it does not
+generate summaries or manage workflow credentials.
+
+## Tech stack
 
 | Layer | Stack |
 | --- | --- |
@@ -37,10 +117,11 @@ description ready for a portfolio or project presentation.
 | Storage | PostgreSQL 17, Alembic |
 | Dashboard | Vue 3 Composition API, TypeScript, Vite, Vue Router, Pinia |
 | Local automation infrastructure | n8n, Ollama; workflows/models supplied separately |
+| Planned CRM integration | HubSpot CRM via a separately configured n8n workflow |
 | Runtime | Docker Compose, unprivileged nginx frontend and Python application user |
 | Quality | pytest, Ruff, Vitest, ESLint, vue-tsc, Playwright with Chrome |
 
-## Phase 7 dashboard and inquiry management
+## Dashboard and inquiry management
 
 - **Overview:** total, high-priority, sales, and support cards; category distribution;
   status counts; five most recent inquiries. Metrics cover the entire database.
@@ -310,6 +391,23 @@ $inquiry = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/inqu
    before claiming a HubSpot record or alert email was delivered.
 
 ## Tests and checks
+
+### Recorded testing results
+
+The latest initial-commit preparation checks recorded on **2026-11-13** passed
+**98 backend pytest tests**, **14 frontend Vitest tests**, Ruff, ESLint, and Vue
+TypeScript checking. Earlier integration verification recorded **10 Chrome
+Playwright tests passed**, Docker builds, migration alignment at revision `0002`,
+and isolated PostgreSQL status checks. These are recorded local results, not a
+claim of CI coverage or tests rerun for this README update.
+
+See [VERIFICATION.md](VERIFICATION.md) for commands, dates, and limitations. Backend
+unit tests use SQLite; PostgreSQL-specific checks are separate. Firefox/Safari,
+assistive-technology testing, large-data performance, and dependency/image
+vulnerability auditing have not been verified. The backend run reports an upstream
+Starlette HTTPX deprecation warning.
+
+### Run the checks
 
 Docker-only test execution (no host Python required):
 
